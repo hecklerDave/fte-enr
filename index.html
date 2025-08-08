@@ -279,9 +279,23 @@
       return ((end - start) / start) * 100.0;
     }
 
-    async function updateCharts() {
+    
+async function updateCharts() {
+  const sel = currentSelection();
+  // Log ALL raw rows for the selected County + LEA
+  console.log('=== RAW records for selection ===');
+  console.table(sel.recs);
+
       const { county, lea, recs } = currentSelection();
-      const slice = getFiveYearSlice(recs);
+      console.log('--- RAW data for selection ---');
+      console.table(recs);
+
+      const slice = getFiveYearSlice(sel.recs);
+  console.log('=== Five-year slice (plotted) ===');
+  console.table(slice);
+      console.log('--- Five year slice ---');
+      console.table(slice);
+
       const years = slice.map(r => r.FYLabel);
       const classified = slice.map(r => r.CLASSFTE);
       const cert = slice.map(r => r.CERTFTE);
@@ -343,6 +357,9 @@
       // Download filtered CSV for current selection
       document.getElementById('dl-csv').addEventListener('click', () => {
         const { county, lea, recs } = currentSelection();
+      console.log('--- RAW data for selection ---');
+      console.table(recs);
+
         const csvHeader = ['County','LEA','FY','FYLabel','EndYear','CLASSFTE','CERTFTE','Enr'];
         const rows = recs.map(r => [r.County, r.LEA, r.FY ?? '', r.FYLabel ?? '', r.EndYear ?? '', r.CLASSFTE, r.CERTFTE, r.Enr]);
         const csv = [csvHeader.join(','), ...rows.map(r => r.join(','))].join('\n');
