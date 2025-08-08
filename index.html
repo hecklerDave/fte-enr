@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FTE & Enrollment Explorer</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <style>
+    :root {
+      --bg: #0b1220; --muted: #a1acc9; --text: #e8ecf7; --ring: rgba(110,168,254,0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+      color: var(--text);
+      background: radial-gradient(1200px 600px at 80% -20%, rgba(110,168,254,0.12), transparent 60%),
+                  radial-gradient(900px 500px at -10% 20%, rgba(143,211,254,0.12), transparent 60%),
+                  var(--bg);
+      min-height: 100vh;
+    }
+    header { padding: 28px 20px 10px; text-align: center; }
+    h1 { margin: 0 0 6px 0; font-size: 28px; letter-spacing: 0.2px; }
+    .sub { color: var(--muted); font-size: 14px; }
+    .controls {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px;
+      max-width: 1100px; margin: 18px auto 8px; padding: 0 16px;
+    }
+    .select-wrap {
+      background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; padding: 12px 14px;
+      box-shadow: 0 0 0 0 var(--ring); transition: box-shadow 160ms ease;
+    }
+    .select-wrap:focus-within { box-shadow: 0 0 0 6px var(--ring); border-color: rgba(255,255,255,0.14); }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 8px; letter-spacing: 0.3px; }
+    select { width: 100%; background: transparent; color: var(--text); border: none; outline: none; font-size: 16px; }
+    button {
+      border: 1px solid rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.06);
+      color: var(--text);
+      padding: 10px 12px; border-radius: 12px; cursor: pointer;
+    }
+    .grid { max-width: 1200px; margin: 16px auto 40px; padding: 0 16px 30px; display: grid; grid-template-columns: 1fr; gap: 16px; }
+    @media (min-width: 1000px) { .grid { grid-template-columns: 1fr 1fr; } .grid .card:last-child { grid-column: 1 / -1; } }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.035), rgba(255,255,255,0.02));
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px; padding: 12px; backdrop-filter: blur(6px); position: relative;
+    }
+    .card h3 { margin: 6px 8px 10px; font-size: 16px; font-weight: 600; letter-spacing: 0.2px; }
+    .plot { height: 340px; width: 100%; }
+    .pill { display: inline-block; font-size: 12px; color: var(--muted); border: 1px solid rgba(255,255,255,0.12);
+            padding: 6px 10px; border-radius: 999px; margin: 8px 8px 0; letter-spacing: 0.3px; }
+    .actions { display:flex; gap:8px; align-items:center; padding: 0 8px 8px; flex-wrap: wrap;}
+    footer { text-align: center; color: var(--muted); font-size: 12px; padding-bottom: 30px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>FTE & Enrollment Explorer</h1>
+    <div class="sub">Select a county and LEA to visualize the last five years.</div>
+  </header>
+
+  <section class="controls">
+    <div class="select-wrap">
+      <label for="county">County</label>
+      <select id="county"></select>
+    </div>
+    <div class="select-wrap">
+      <label for="lea">LEA</label>
+      <select id="lea"></select>
+    </div>
+    <div class="select-wrap">
+      <label>Exports</label>
+      <div class="actions">
+        <button id="dl-csv">Download CSV (filtered)</button>
+        <button id="dl-all-png">Download All Charts (ZIP)</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <div class="actions">
+        <h3 style="flex:1">Classified FTE (last 5 years)</h3>
+        <button data-dlid="plot1" class="dl-one">PNG</button>
+      </div>
+      <div id="plot1" class="plot"></div>
+    </div>
+    <div class="card">
+      <div class="actions">
+        <h3 style="flex:1">CERT FTE (last 5 years)</h3>
+        <button data-dlid="plot2" class="dl-one">PNG</button>
+      </div>
+      <div id="plot2" class="plot"></div>
+    </div>
+    <div class="card">
+      <div class="actions">
+        <h3 style="flex:1">Enrollment (last 5 years)</h3>
+        <button data-dlid="plot3" class="dl-one">PNG</button>
+      </div>
+      <div id="plot3" class="plot"></div>
+    </div>
+    <div class="card">
+      <div class="actions">
+        <h3 style="flex:1">Cumulative Percent Change (5-year window)</h3>
+        <div class="pill" id="period"></div>
+        <button data-dlid="plot4" class="dl-one">PNG</button>
+      </div>
+      <div id="plot4" class="plot"></div>
+    </div>
+  </section>
+
+  <footer>
+    Built for SSC • Bars show exact values per year; the last card shows % change from the first to the last year in the 5-year window.
+  </footer>
+
+  <script>
+    const DATA_URL = 'data.csv'; // same-repo CSV
+
+    const countySelect = document.getElementById('county');
+    const leaSelect = document.getElementById('lea');
+
+    let RAW = []; // full table as objects
+
+    function deriveYear(rec) {
+      // Prefer explicit Year if valid
+      const y = parseInt(rec.Year);
+      if (!isNaN(y)) return y;
+
+      // Derive from FY formats like "2018-19", "FY 2021-22", "2019/20", etc.
+      const fy = (rec.FY || '').toString();
+      // capture the last two or four digits block as the ENDING year
+      // Examples: 2018-19 -> 2019, 2020-2021 -> 2021, 2019/20 -> 2020
+      let m = fy.match(/(\d{4})\s*[-/]\s*(\d{2,4})/);
+      if (m) {
+        const first = parseInt(m[1]);
+        const tail = m[2];
+        let end;
+        if (tail.length === 2) {
+          // infer century based on first
+          const century = Math.floor(first / 100) * 100;
+          const tailNum = parseInt(tail,10);
+          end = century + tailNum;
+          // handle rollovers like 1999-00 -> 2000
+          if (end < first) end += 100;
+        } else {
+          end = parseInt(tail,10);
+        }
+        if (!isNaN(end)) return end;
+      }
+
+      // Fallback: a standalone 4-digit year somewhere
+      let m2 = fy.match(/(19|20)\d{2}/g);
+      if (m2 && m2.length) {
+        // Use the last occurrence as ending year
+        return parseInt(m2[m2.length - 1],10);
+      }
+      return null;
+    }
+
+    function loadData() {
+      return new Promise((resolve, reject) => {
+        Papa.parse(DATA_URL, {
+          download: true,
+          header: true,
+          dynamicTyping: true,
+          complete: (results) => {
+            RAW = results.data.map(r => ({
+              County: r.County,
+              LEA: r.LEA,
+              FY: r.FY,
+              Year: deriveYear(r),
+              CLASSFTE: Number(r.CLASSFTE) || 0,
+              CERTFTE: Number(r.CERTFTE) || 0,
+              Enr: Number(r.Enr) || 0,
+            })).filter(r => r.County && r.LEA);
+            resolve();
+          },
+          error: reject
+        });
+      });
+    }
+
+    function populateCounties() {
+      const counties = Array.from(new Set(RAW.map(r => r.County))).sort();
+      countySelect.innerHTML = counties.map(c => `<option value="${c}">${c}</option>`).join('');
+    }
+
+    function populateLeas(county) {
+      const leas = Array.from(new Set(RAW.filter(r => r.County === county).map(r => r.LEA))).sort();
+      leaSelect.innerHTML = leas.map(l => `<option value="${l}">${l}</option>`).join('');
+    }
+
+    function getFiveYearSlice(records) {
+      const byYear = records
+        .filter(r => r.Year != null)
+        .sort((a,b) => a.Year - b.Year);
+      const years = Array.from(new Set(byYear.map(r => r.Year)))
+        .sort((a,b) => b - a)
+        .slice(0,5)
+        .sort((a,b) => a - b);
+      return years.map(y => {
+        // pick last record for that year if duplicates
+        const row = byYear.filter(r => r.Year === y).slice(-1)[0];
+        return { Year: y, CLASSFTE: row?.CLASSFTE || 0, CERTFTE: row?.CERTFTE || 0, Enr: row?.Enr || 0 };
+      });
+    }
+
+    function currentSelection() {
+      const county = countySelect.value;
+      const lea = leaSelect.value;
+      const recs = RAW.filter(r => r.County === county && r.LEA === lea);
+      return { county, lea, recs };
+    }
+
+    function plotBar(divId, xYears, yValues) {
+      const trace = { type: 'bar', x: xYears, y: yValues, hovertemplate: '%{y:,}<extra></extra>' };
+      const layout = {
+        margin: { t: 10, r: 12, b: 36, l: 60 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#e8ecf7' },
+        xaxis: { tickmode: 'array', tickvals: xYears },
+        yaxis: { gridcolor: 'rgba(255,255,255,0.08)' },
+      };
+      Plotly.newPlot(divId, [trace], layout, {displayModeBar: false, responsive: true});
+    }
+
+    function plotPercentChange(divId, labels, percents) {
+      const trace = { type: 'bar', x: labels, y: percents.map(v => v/100), hovertemplate: '%{y:.1%}<extra></extra>' };
+      const layout = {
+        margin: { t: 10, r: 12, b: 36, l: 60 },
+        paper_bgcolor: 'rgba(0,0,0,0)',
+        plot_bgcolor: 'rgba(0,0,0,0)',
+        font: { color: '#e8ecf7' },
+        yaxis: { tickformat: ',.0%', gridcolor: 'rgba(255,255,255,0.08)' }
+      };
+      Plotly.newPlot(divId, [trace], layout, {displayModeBar: false, responsive: true});
+    }
+
+    function pctChange(vals) {
+      if (!vals.length) return 0;
+      const start = vals[0];
+      const end = vals[vals.length - 1];
+      if (start === 0 || start == null || end == null) return 0;
+      return ((end - start) / start) * 100.0;
+    }
+
+    async function updateCharts() {
+      const { county, lea, recs } = currentSelection();
+      const slice = getFiveYearSlice(recs);
+      const years = slice.map(r => r.Year);
+      const classified = slice.map(r => r.CLASSFTE);
+      const cert = slice.map(r => r.CERTFTE);
+      const enr = slice.map(r => r.Enr);
+
+      plotBar('plot1', years, classified);
+      plotBar('plot2', years, cert);
+      plotBar('plot3', years, enr);
+
+      if (slice.length) {
+        document.getElementById('period').textContent = `Window: ${slice[0].Year}–${slice[slice.length-1].Year}`;
+      } else {
+        document.getElementById('period').textContent = '';
+      }
+
+      const pct = [pctChange(classified), pctChange(cert), pctChange(enr)];
+      plotPercentChange('plot4', ['Classified FTE', 'CERT FTE', 'Enrollment'], pct);
+    }
+
+    async function init() {
+      await loadData();
+      populateCounties();
+      populateLeas(countySelect.value);
+      updateCharts();
+
+      countySelect.addEventListener('change', () => { populateLeas(countySelect.value); updateCharts(); });
+      leaSelect.addEventListener('change', updateCharts);
+
+      // Export one chart button(s)
+      document.querySelectorAll('.dl-one').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          const divId = e.currentTarget.getAttribute('data-dlid');
+          const el = document.getElementById(divId);
+          const dataURL = await Plotly.toImage(el, {format: 'png', height: 680, width: 1100, scale: 2});
+          const link = document.createElement('a');
+          link.href = dataURL;
+          const { county, lea } = currentSelection();
+          link.download = `${county}__${lea}__${divId}.png`.replace(/\s+/g,'_');
+          link.click();
+        });
+      });
+
+      // Export all charts as ZIP
+      document.getElementById('dl-all-png').addEventListener('click', async () => {
+        const ids = ['plot1','plot2','plot3','plot4'];
+        const zip = new JSZip();
+        const { county, lea } = currentSelection();
+        for (const id of ids) {
+          const el = document.getElementById(id);
+          const dataURL = await Plotly.toImage(el, {format: 'png', height: 680, width: 1100, scale: 2});
+          const base64 = dataURL.split(',')[1];
+          const fname = `${county}__${lea}__${id}.png`.replace(/\s+/g,'_');
+          zip.file(fname, base64, {base64: true});
+        }
+        const blob = await zip.generateAsync({type:'blob'});
+        saveAs(blob, `${county}__${lea}__charts.zip`.replace(/\s+/g,'_'));
+      });
+
+      // Download filtered CSV for current selection
+      document.getElementById('dl-csv').addEventListener('click', () => {
+        const { county, lea, recs } = currentSelection();
+        const csvHeader = ['County','LEA','FY','Year','CLASSFTE','CERTFTE','Enr'];
+        const rows = recs.map(r => [r.County, r.LEA, r.FY ?? '', r.Year ?? '', r.CLASSFTE, r.CERTFTE, r.Enr]);
+        const csv = [csvHeader.join(','), ...rows.map(r => r.join(','))].join('\n');
+        const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
+        saveAs(blob, `${county}__${lea}__filtered.csv`.replace(/\s+/g,'_'));
+      });
+    }
+
+    init();
+  </script>
+</body>
+</html>
