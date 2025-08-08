@@ -126,30 +126,51 @@
 
     let RAW = []; // full table as objects
 
-    function deriveYear(rec) {
-      // Prefer explicit Year if valid
-      const y = parseInt(rec.Year);
-      if (!isNaN(y)) return y;
+    
+    function parseFY(raw) {
+      const s = (raw ?? '').toString().trim();
 
-      // Derive from FY formats like "2018-19", "FY 2021-22", "2019/20", etc.
-      const fy = (rec.FY || '').toString();
-      // capture the last two or four digits block as the ENDING year
-      // Examples: 2018-19 -> 2019, 2020-2021 -> 2021, 2019/20 -> 2020
-      let m = fy.match(/(\d{4})\s*[-/]\s*(\d{2,4})/);
+      // Case 1: compact 4-digit form like "1819", "0607", "9900"
+      const onlyDigits = s.replace(/\D/g, '');
+      if (/^\d{4}$/.test(onlyDigits)) {
+        const yy1 = parseInt(onlyDigits.slice(0,2),10);
+        const yy2 = parseInt(onlyDigits.slice(2,4),10);
+        // Expand first year with pivot 90 -> 1990..1999, else 2000..2089
+        const startFull = (yy1 >= 90 ? 1900 : 2000) + yy1;
+        let endFull = (yy2 >= 90 ? 1900 : 2000) + yy2;
+        if (endFull < startFull) endFull += 100; // rollover 1999->2000 etc.
+        const label = `${startFull}-${String(endFull).slice(2)}`;
+        return { endYear: endFull, label };
+      }
+
+      // Case 2: patterns like "2018-19", "2019/20", "FY 2017-18"
+      let m = s.match(/(19|20)\d{2}\s*[-/]\s*(\d{2,4})/);
       if (m) {
-        const first = parseInt(m[1]);
+        const startFull = parseInt(m[0].match(/(19|20)\d{2}/)[0],10);
         const tail = m[2];
-        let end;
+        let endFull;
         if (tail.length === 2) {
-          // infer century based on first
-          const century = Math.floor(first / 100) * 100;
-          const tailNum = parseInt(tail,10);
-          end = century + tailNum;
-          // handle rollovers like 1999-00 -> 2000
-          if (end < first) end += 100;
+          const century = Math.floor(startFull/100) * 100;
+          endFull = century + parseInt(tail,10);
+          if (endFull < startFull) endFull += 100;
         } else {
-          end = parseInt(tail,10);
+          endFull = parseInt(tail,10);
         }
+        const label = `${startFull}-${String(endFull).slice(2)}`;
+        return { endYear: endFull, label };
+      }
+
+      // Case 3: standalone 4-digit year
+      let m2 = s.match(/(19|20)\d{2}/g);
+      if (m2 && m2.length) {
+        const endFull = parseInt(m2[m2.length-1],10);
+        const startFull = endFull - 1;
+        const label = `${startFull}-${String(endFull).slice(2)}`;
+        return { endYear: endFull, label };
+      }
+
+      return { endYear: null, label: s || '' };
+    }
         if (!isNaN(end)) return end;
       }
 
@@ -173,7 +194,9 @@
               County: r.County,
               LEA: r.LEA,
               FY: r.FY,
-              Year: deriveYear(r),
+              const fy = parseFY(r.FY),
+              EndYear: fy.endYear,
+              FYLabel: fy.label,
               CLASSFTE: Number(r.CLASSFTE) || 0,
               CERTFTE: Number(r.CERTFTE) || 0,
               Enr: Number(r.Enr) || 0,
@@ -195,21 +218,27 @@
       leaSelect.innerHTML = leas.map(l => `<option value="${l}">${l}</option>`).join('');
     }
 
+    
     function getFiveYearSlice(records) {
-      const byYear = records
-        .filter(r => r.Year != null)
-        .sort((a,b) => a.Year - b.Year);
-      const years = Array.from(new Set(byYear.map(r => r.Year)))
+      const byY = records
+        .filter(r => r.EndYear != null)
+        .sort((a,b) => a.EndYear - b.EndYear);
+      const endYears = Array.from(new Set(byY.map(r => r.EndYear)))
         .sort((a,b) => b - a)
         .slice(0,5)
         .sort((a,b) => a - b);
-      return years.map(y => {
-        // pick last record for that year if duplicates
-        const row = byYear.filter(r => r.Year === y).slice(-1)[0];
-        return { Year: y, CLASSFTE: row?.CLASSFTE || 0, CERTFTE: row?.CERTFTE || 0, Enr: row?.Enr || 0 };
+      return endYears.map(y => {
+        const row = byY.filter(r => r.EndYear === y).slice(-1)[0];
+        return {
+          FYLabel: row?.FYLabel || '',
+          EndYear: y,
+          CLASSFTE: row?.CLASSFTE || 0,
+          CERTFTE: row?.CERTFTE || 0,
+          Enr: row?.Enr || 0
+        };
       });
     }
-
+    
     function currentSelection() {
       const county = countySelect.value;
       const lea = leaSelect.value;
@@ -253,7 +282,7 @@
     async function updateCharts() {
       const { county, lea, recs } = currentSelection();
       const slice = getFiveYearSlice(recs);
-      const years = slice.map(r => r.Year);
+      const years = slice.map(r => r.FYLabel);
       const classified = slice.map(r => r.CLASSFTE);
       const cert = slice.map(r => r.CERTFTE);
       const enr = slice.map(r => r.Enr);
@@ -263,7 +292,7 @@
       plotBar('plot3', years, enr);
 
       if (slice.length) {
-        document.getElementById('period').textContent = `Window: ${slice[0].Year}–${slice[slice.length-1].Year}`;
+        document.getElementById('period').textContent = `Window: ${slice[0].FYLabel} → ${slice[slice.length-1].FYLabel}`;
       } else {
         document.getElementById('period').textContent = '';
       }
@@ -314,8 +343,8 @@
       // Download filtered CSV for current selection
       document.getElementById('dl-csv').addEventListener('click', () => {
         const { county, lea, recs } = currentSelection();
-        const csvHeader = ['County','LEA','FY','Year','CLASSFTE','CERTFTE','Enr'];
-        const rows = recs.map(r => [r.County, r.LEA, r.FY ?? '', r.Year ?? '', r.CLASSFTE, r.CERTFTE, r.Enr]);
+        const csvHeader = ['County','LEA','FY','FYLabel','EndYear','CLASSFTE','CERTFTE','Enr'];
+        const rows = recs.map(r => [r.County, r.LEA, r.FY ?? '', r.FYLabel ?? '', r.EndYear ?? '', r.CLASSFTE, r.CERTFTE, r.Enr]);
         const csv = [csvHeader.join(','), ...rows.map(r => r.join(','))].join('\n');
         const blob = new Blob([csv], {type: 'text/csv;charset=utf-8;'});
         saveAs(blob, `${county}__${lea}__filtered.csv`.replace(/\s+/g,'_'));
